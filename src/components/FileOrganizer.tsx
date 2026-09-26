@@ -41,77 +41,18 @@ export const FileOrganizer: React.FC<FileOrganizerProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
-  // Native File System Access API (showDirectoryPicker)
-  const handleConnectRealDirectory = async () => {
-    if (!('showDirectoryPicker' in window)) {
-      alert('Your browser does not support the File System Access API (showDirectoryPicker). Please use Chrome, Edge, or Brave, or drag-and-drop your files directly.');
-      return;
-    }
+  // Cross-origin & iFrame safe folder connection using HTML5 webkitdirectory
+  const handleConnectRealDirectory = () => {
+    // Directly trigger standard folder picker which is 100% permitted inside iframes and cross-origin subframes
+    folderInputRef.current?.click();
+  };
 
-    try {
+  const handleFolderInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
       setIsScanningDirectory(true);
-      const dirHandle = await (window as any).showDirectoryPicker();
-      const existing = db.getFiles();
-      let importedCount = 0;
-
-      // Recursive scanner
-      async function scanDir(handle: any, currentPath: string) {
-        for await (const entry of handle.values()) {
-          if (entry.kind === 'file') {
-            const rawFile: File = await entry.getFile();
-            // Process file
-            let textContent = '';
-            if (rawFile.size < 500000 && !rawFile.type.startsWith('image/')) {
-              try {
-                textContent = await rawFile.text();
-              } catch (_) {}
-            }
-
-            const evaluated = LocalIntelligenceEngine.evaluateFile(
-              rawFile.name,
-              rawFile.size,
-              textContent,
-              existing
-            );
-
-            const newStoredFile: StoredFile = {
-              id: `real-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-              name: rawFile.name,
-              originalPath: `${currentPath}/${rawFile.name}`,
-              currentPath: `${currentPath}/${rawFile.name}`,
-              category: evaluated.category,
-              subcategory: evaluated.subcategory,
-              size: rawFile.size,
-              extension: rawFile.name.split('.').pop() || '',
-              mimeType: rawFile.type || 'application/octet-stream',
-              lastModified: new Date(rawFile.lastModified || Date.now()).toISOString(),
-              contentPreview: textContent.substring(0, 300) || `${rawFile.name} (${formatBytes(rawFile.size)})`,
-              textContent: textContent.substring(0, 5000),
-              tags: evaluated.tags,
-              isJunk: evaluated.isJunk,
-              junkReason: evaluated.junkReason,
-              duplicateOfId: evaluated.duplicateOfId,
-              suggestedOrganizedPath: evaluated.suggestedPath,
-              isOrganized: false,
-              accessCount: 1,
-              lastAccessedAt: new Date().toISOString()
-            };
-
-            db.addFile(newStoredFile);
-            importedCount++;
-          }
-        }
-      }
-
-      await scanDir(dirHandle, `/${dirHandle.name}`);
-      LocalIntelligenceEngine.learnFromFiles();
-      onRefresh();
-    } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        console.error('Failed to open directory:', err);
-      }
-    } finally {
+      processRealFiles(Array.from(e.target.files));
       setIsScanningDirectory(false);
     }
   };
@@ -162,6 +103,7 @@ export const FileOrganizer: React.FC<FileOrganizerProps> = ({
 
     fileList.forEach(rawFile => {
       const reader = new FileReader();
+      const relPath = (rawFile as any).webkitRelativePath ? `/${(rawFile as any).webkitRelativePath}` : `/Desktop/${rawFile.name}`;
 
       reader.onload = (event) => {
         const textContent = typeof event.target?.result === 'string' ? event.target.result : '';
@@ -175,8 +117,8 @@ export const FileOrganizer: React.FC<FileOrganizerProps> = ({
         const newStoredFile: StoredFile = {
           id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
           name: rawFile.name,
-          originalPath: `/Desktop/${rawFile.name}`,
-          currentPath: `/Desktop/${rawFile.name}`,
+          originalPath: relPath,
+          currentPath: relPath,
           category: evaluated.category,
           subcategory: evaluated.subcategory,
           size: rawFile.size,
@@ -208,8 +150,8 @@ export const FileOrganizer: React.FC<FileOrganizerProps> = ({
         const newStoredFile: StoredFile = {
           id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
           name: rawFile.name,
-          originalPath: `/Desktop/${rawFile.name}`,
-          currentPath: `/Desktop/${rawFile.name}`,
+          originalPath: relPath,
+          currentPath: relPath,
           category: evaluated.category,
           subcategory: evaluated.subcategory,
           size: rawFile.size,
@@ -387,9 +329,9 @@ export const FileOrganizer: React.FC<FileOrganizerProps> = ({
         {showAccessHelp ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-xs text-slate-300 border-t border-slate-800/80">
             <div className="p-3 bg-slate-950 rounded-lg border border-slate-800/60">
-              <span className="font-semibold text-cyan-300 block mb-1">1. Native Folder Connection</span>
+              <span className="font-semibold text-cyan-300 block mb-1">1. Local Folder Connection</span>
               <p className="text-slate-400 leading-relaxed text-[11px]">
-                Clicking <strong>Connect Real Local Folder</strong> uses the browser's native <code>showDirectoryPicker()</code> API. You choose a local folder (e.g. <code>Downloads</code>), grant read permission, and Archon inspects files directly on your disk.
+                Clicking <strong>Connect Real Local Folder</strong> opens your browser's native folder selector. You choose any local directory (e.g. <code>Downloads</code>, <code>Desktop</code>), and Archon scans files and relative paths directly.
               </p>
             </div>
             <div className="p-3 bg-slate-950 rounded-lg border border-slate-800/60">
@@ -430,6 +372,16 @@ export const FileOrganizer: React.FC<FileOrganizerProps> = ({
           multiple 
           onChange={handleFileInputChange} 
           className="hidden" 
+        />
+        <input
+          ref={folderInputRef}
+          type="file"
+          multiple
+          // @ts-ignore
+          webkitdirectory=""
+          directory=""
+          onChange={handleFolderInputChange}
+          className="hidden"
         />
         <div className="max-w-md mx-auto flex flex-col items-center">
           <div className="w-10 h-10 rounded-lg bg-slate-800/80 flex items-center justify-center text-slate-300 mb-2">
