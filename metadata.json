@@ -1,0 +1,6 @@
+{
+  "name": "Archon Offline AI File & Data Assistant",
+  "description": "An intelligent, 100% offline personal data assistant that automatically arranges files, manages daily work, answers questions, cleans junk files, and learns from your patterns without ever leaving your device.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
